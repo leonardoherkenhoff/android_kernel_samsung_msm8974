@@ -83,3 +83,6 @@ GTAGS
 *.orig
 *~
 \#*#
+
+# build output folder
+/build/
