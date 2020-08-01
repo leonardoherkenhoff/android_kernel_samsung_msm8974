@@ -49,8 +49,10 @@ struct msm_isp_bufq *msm_isp_get_bufq(
 	struct msm_isp_bufq *bufq = NULL;
 	uint32_t bufq_index = bufq_handle & 0xFF;
 
-	if (bufq_index > buf_mgr->num_buf_q)
-		return bufq;
+	/* bufq_handle cannot be 0 */
+	if ((bufq_handle == 0) ||
+		(bufq_index >= buf_mgr->num_buf_q))
+		return NULL;
 
 	bufq = &buf_mgr->bufq[bufq_index];
 	if (bufq->bufq_handle == bufq_handle)
@@ -526,11 +528,9 @@ static int msm_isp_buf_done(struct msm_isp_buf_mgr *buf_mgr,
 				return rc;
 			}
 		} else {
-			buf_info->vb2_buf->v4l2_buf.timestamp = *tv;
-			buf_info->vb2_buf->v4l2_buf.sequence  = frame_id;
-			buf_info->vb2_buf->v4l2_buf.reserved = output_format;
 			buf_mgr->vb2_ops->buf_done(buf_info->vb2_buf,
-						   bufq->session_id, bufq->stream_id);
+				bufq->session_id, bufq->stream_id,
+				frame_id, tv, output_format);
 		}
 	}
 

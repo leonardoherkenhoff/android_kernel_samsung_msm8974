@@ -1,4 +1,5 @@
-/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2015, 2017-2018 The Linux Foundation.
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -255,9 +256,9 @@ static int diagchar_open(struct inode *inode, struct file *file)
 	return -ENOMEM;
 
 fail:
-	mutex_unlock(&driver->diagchar_mutex);
 	driver->num_clients--;
-	pr_alert("diag: Insufficient memory for new client");
+	mutex_unlock(&driver->diagchar_mutex);
+	pr_err_ratelimited("diag: Insufficient memory for new client");
 	return -ENOMEM;
 }
 
@@ -1081,14 +1082,20 @@ long diagchar_ioctl(struct file *filp,
 		result = DIAG_DCI_NO_ERROR;
 		break;
 	case DIAG_IOCTL_DCI_EVENT_STATUS:
+		mutex_lock(&driver->dci_mutex);
 		if (copy_from_user(&le_stats, (void *)ioarg,
-					sizeof(struct diag_log_event_stats)))
+					sizeof(struct diag_log_event_stats))) {
+			mutex_unlock(&driver->dci_mutex);
 			return -EFAULT;
+		}
 		le_stats.is_set = diag_dci_query_event_mask(le_stats.code);
 		if (copy_to_user((void *)ioarg, &le_stats,
-				sizeof(struct diag_log_event_stats)))
+				sizeof(struct diag_log_event_stats))) {
+			mutex_unlock(&driver->dci_mutex);
 			return -EFAULT;
+		}
 		result = DIAG_DCI_NO_ERROR;
+		mutex_unlock(&driver->dci_mutex);
 		break;
 	case DIAG_IOCTL_DCI_CLEAR_LOGS:
 		if (copy_from_user((void *)&client_id, (void *)ioarg,
@@ -1103,12 +1110,16 @@ long diagchar_ioctl(struct file *filp,
 		result = diag_dci_clear_event_mask();
 		break;
 	case DIAG_IOCTL_LSM_DEINIT:
+		mutex_lock(&driver->diagchar_mutex);
 		for (i = 0; i < driver->num_clients; i++)
 			if (driver->client_map[i].pid == current->tgid)
 				break;
-		if (i == driver->num_clients)
+		if (i == driver->num_clients) {
+			mutex_unlock(&driver->diagchar_mutex);
 			return -EINVAL;
+		}
 		driver->data_ready[i] |= DEINIT_TYPE;
+		mutex_unlock(&driver->diagchar_mutex);
 		wake_up_interruptible(&driver->wait_q);
 		result = 1;
 		break;

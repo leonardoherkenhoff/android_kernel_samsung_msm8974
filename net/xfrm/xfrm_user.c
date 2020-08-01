@@ -1258,6 +1258,9 @@ static int validate_tmpl(int nr, struct xfrm_user_tmpl *ut, u16 family)
 		if (!ut[i].family)
 			ut[i].family = family;
 
+		if (ut[i].mode >= XFRM_MODE_MAX)
+			return -EINVAL;
+
 		switch (ut[i].family) {
 		case AF_INET:
 			break;
@@ -1527,7 +1530,8 @@ static int xfrm_dump_policy_done(struct netlink_callback *cb)
 {
 	struct xfrm_policy_walk *walk = (struct xfrm_policy_walk *) &cb->args[1];
 
-	xfrm_policy_walk_done(walk);
+	if (cb->args[0])
+		xfrm_policy_walk_done(walk);
 	return 0;
 }
 

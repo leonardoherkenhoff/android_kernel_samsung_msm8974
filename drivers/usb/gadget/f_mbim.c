@@ -356,6 +356,80 @@ static struct usb_descriptor_header *mbim_hs_function[] = {
 	NULL,
 };
 
+/* Super Speed Support */
+static struct usb_endpoint_descriptor ss_mbim_notify_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+	.bEndpointAddress =	USB_DIR_IN,
+	.bmAttributes =		USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize =	4*cpu_to_le16(NCM_STATUS_BYTECOUNT),
+	.bInterval =		LOG2_STATUS_INTERVAL_MSEC + 4,
+};
+
+static struct usb_ss_ep_comp_descriptor ss_mbim_notify_comp_desc = {
+	.bLength =		sizeof(ss_mbim_notify_comp_desc),
+	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 3 values can be tweaked if necessary */
+	/* .bMaxBurst =         0, */
+	/* .bmAttributes =      0, */
+	.wBytesPerInterval =	4*cpu_to_le16(NCM_STATUS_BYTECOUNT),
+};
+
+static struct usb_endpoint_descriptor ss_mbim_in_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+	.bEndpointAddress =	USB_DIR_IN,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize =	__constant_cpu_to_le16(1024),
+};
+
+static struct usb_ss_ep_comp_descriptor ss_mbim_in_comp_desc = {
+	.bLength =              sizeof(ss_mbim_in_comp_desc),
+	.bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 2 values can be tweaked if necessary */
+	/* .bMaxBurst =         0, */
+	/* .bmAttributes =      0, */
+};
+
+static struct usb_endpoint_descriptor ss_mbim_out_desc = {
+	.bLength =		USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType =	USB_DT_ENDPOINT,
+	.bEndpointAddress =	USB_DIR_OUT,
+	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize =	__constant_cpu_to_le16(1024),
+};
+
+static struct usb_ss_ep_comp_descriptor ss_mbim_out_comp_desc = {
+	.bLength =		sizeof(ss_mbim_out_comp_desc),
+	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 2 values can be tweaked if necessary */
+	/* .bMaxBurst =         0, */
+	/* .bmAttributes =      0, */
+};
+
+static struct usb_descriptor_header *mbim_ss_function[] = {
+	(struct usb_descriptor_header *) &mbim_iad_desc,
+	/* MBIM control descriptors */
+	(struct usb_descriptor_header *) &mbim_control_intf,
+	(struct usb_descriptor_header *) &mbim_header_desc,
+	(struct usb_descriptor_header *) &mbim_union_desc,
+	(struct usb_descriptor_header *) &mbb_desc,
+	(struct usb_descriptor_header *) &ext_mbb_desc,
+	(struct usb_descriptor_header *) &ss_mbim_notify_desc,
+	(struct usb_descriptor_header *) &ss_mbim_notify_comp_desc,
+	/* data interface, altsettings 0 and 1 */
+	(struct usb_descriptor_header *) &mbim_data_nop_intf,
+	(struct usb_descriptor_header *) &mbim_data_intf,
+	(struct usb_descriptor_header *) &ss_mbim_in_desc,
+	(struct usb_descriptor_header *) &ss_mbim_in_comp_desc,
+	(struct usb_descriptor_header *) &ss_mbim_out_desc,
+	(struct usb_descriptor_header *) &ss_mbim_out_comp_desc,
+	NULL,
+};
+
 /* string descriptors: */
 
 #define STRING_CTRL_IDX	0
@@ -560,24 +634,24 @@ static void fmbim_ctrl_response_available(struct f_mbim *dev)
 	unsigned long			flags;
 	int				ret;
 
-	pr_debug("dev:%p portno#%d\n", dev, dev->port_num);
+	pr_debug("dev:%pK portno#%d\n", dev, dev->port_num);
 
 	spin_lock_irqsave(&dev->lock, flags);
 
 	if (!atomic_read(&dev->online)) {
-		pr_err("dev:%p is not online\n", dev);
+		pr_err("dev:%pK is not online\n", dev);
 		spin_unlock_irqrestore(&dev->lock, flags);
 		return;
 	}
 
 	if (!req) {
-		pr_err("dev:%p req is NULL\n", dev);
+		pr_err("dev:%pK req is NULL\n", dev);
 		spin_unlock_irqrestore(&dev->lock, flags);
 		return;
 	}
 
 	if (!req->buf) {
-		pr_err("dev:%p req->buf is NULL\n", dev);
+		pr_err("dev:%pK req->buf is NULL\n", dev);
 		spin_unlock_irqrestore(&dev->lock, flags);
 		return;
 	}
@@ -616,21 +690,21 @@ fmbim_send_cpkt_response(struct f_mbim *gr, struct ctrl_pkt *cpkt)
 	unsigned long	flags;
 
 	if (!gr || !cpkt) {
-		pr_err("Invalid cpkt, dev:%p cpkt:%p\n",
+		pr_err("Invalid cpkt, dev:%pK cpkt:%pK\n",
 				gr, cpkt);
 		return -ENODEV;
 	}
 
-	pr_debug("dev:%p port_num#%d\n", dev, dev->port_num);
+	pr_debug("dev:%pK port_num#%d\n", dev, dev->port_num);
 
 	if (!atomic_read(&dev->online)) {
-		pr_err("dev:%p is not connected\n", dev);
+		pr_err("dev:%pK is not connected\n", dev);
 		mbim_free_ctrl_pkt(cpkt);
 		return 0;
 	}
 
 	if (dev->not_port.notify_state != MBIM_NOTIFY_RESPONSE_AVAILABLE) {
-		pr_err("dev:%p state=%d, recover!!\n", dev,
+		pr_err("dev:%pK state=%d, recover!!\n", dev,
 			dev->not_port.notify_state);
 		mbim_free_ctrl_pkt(cpkt);
 		return 0;
@@ -693,7 +767,7 @@ static int mbim_bam_connect(struct f_mbim *dev)
 	enum peer_bam bam_name = (dev->xport == USB_GADGET_XPORT_BAM2BAM_IPA) ?
 							IPA_P_BAM : A2_P_BAM;
 
-	pr_info("dev:%p portno:%d\n", dev, dev->port_num);
+	pr_info("dev:%pK portno:%d\n", dev, dev->port_num);
 
 	src_connection_idx = usb_bam_get_connection_idx(gadget->name, bam_name,
 					USB_TO_PEER_PERIPHERAL, dev->port_num);
@@ -720,7 +794,7 @@ static int mbim_bam_connect(struct f_mbim *dev)
 
 static int mbim_bam_disconnect(struct f_mbim *dev)
 {
-	pr_info("dev:%p port:%d. Do nothing.\n",
+	pr_info("dev:%pK port:%d. Do nothing.\n",
 			dev, dev->port_num);
 
 	bam_data_disconnect(&dev->bam_port, dev->port_num);
@@ -1490,8 +1564,8 @@ mbim_bind(struct usb_configuration *c, struct usb_function *f)
 		mbb_desc.wMaxSegmentSize = cpu_to_le16(0xfe0);
 
 	/* copy descriptors, and track endpoint copies */
-	f->descriptors = usb_copy_descriptors(mbim_fs_function);
-	if (!f->descriptors)
+	f->fs_descriptors = usb_copy_descriptors(mbim_fs_function);
+	if (!f->fs_descriptors)
 		goto fail;
 
 	/*
@@ -1510,6 +1584,20 @@ mbim_bind(struct usb_configuration *c, struct usb_function *f)
 		/* copy descriptors, and track endpoint copies */
 		f->hs_descriptors = usb_copy_descriptors(mbim_hs_function);
 		if (!f->hs_descriptors)
+			goto fail;
+	}
+
+	if (gadget_is_superspeed(c->cdev->gadget)) {
+		ss_mbim_in_desc.bEndpointAddress =
+				fs_mbim_in_desc.bEndpointAddress;
+		ss_mbim_out_desc.bEndpointAddress =
+				fs_mbim_out_desc.bEndpointAddress;
+		ss_mbim_notify_desc.bEndpointAddress =
+				fs_mbim_notify_desc.bEndpointAddress;
+
+		/* copy descriptors, and track endpoint copies */
+		f->ss_descriptors = usb_copy_descriptors(mbim_ss_function);
+		if (!f->ss_descriptors)
 			goto fail;
 	}
 
@@ -1535,8 +1623,12 @@ mbim_bind(struct usb_configuration *c, struct usb_function *f)
 fail:
 	pr_err("%s failed to bind, err %d\n", f->name, status);
 
-	if (f->descriptors)
-		usb_free_descriptors(f->descriptors);
+	if (f->ss_descriptors)
+		usb_free_descriptors(f->ss_descriptors);
+	if (f->hs_descriptors)
+		usb_free_descriptors(f->hs_descriptors);
+	if (f->fs_descriptors)
+		usb_free_descriptors(f->fs_descriptors);
 
 	if (mbim->not_port.notify_req) {
 		kfree(mbim->not_port.notify_req->buf);
@@ -1560,9 +1652,13 @@ static void mbim_unbind(struct usb_configuration *c, struct usb_function *f)
 	struct f_mbim	*mbim = func_to_mbim(f);
 
 	bam_data_destroy(mbim->port_num);
+
+	if (gadget_is_superspeed(c->cdev->gadget))
+		usb_free_descriptors(f->ss_descriptors);
+
 	if (gadget_is_dualspeed(c->cdev->gadget))
 		usb_free_descriptors(f->hs_descriptors);
-	usb_free_descriptors(f->descriptors);
+	usb_free_descriptors(f->fs_descriptors);
 
 	kfree(mbim->not_port.notify_req->buf);
 	usb_ep_free_request(mbim->not_port.notify, mbim->not_port.notify_req);

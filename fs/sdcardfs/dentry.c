@@ -51,7 +51,6 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	 * whether the base obbpath has been changed or not
 	 */
 	if (is_obbpath_invalid(dentry)) {
-		d_drop(dentry);
 		return 0;
 	}
 
@@ -63,9 +62,15 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	lower_cur_parent_dentry = dget_parent(lower_dentry);
 
 	if ((lower_dentry->d_flags & DCACHE_OP_REVALIDATE)) {
+		struct path ptmp;
+		if (nd) {
+			pathcpy(&ptmp, &nd->path);
+			pathcpy(&nd->path, &lower_path);
+		}
 		err = lower_dentry->d_op->d_revalidate(lower_dentry, nd);
+		if (nd)
+			pathcpy(&nd->path, &ptmp);
 		if (err == 0) {
-			d_drop(dentry);
 			goto out;
 		}
 	}
@@ -73,14 +78,12 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	spin_lock(&lower_dentry->d_lock);
 	if (d_unhashed(lower_dentry)) {
 		spin_unlock(&lower_dentry->d_lock);
-		d_drop(dentry);
 		err = 0;
 		goto out;
 	}
 	spin_unlock(&lower_dentry->d_lock);
 
 	if (parent_lower_dentry != lower_cur_parent_dentry) {
-		d_drop(dentry);
 		err = 0;
 		goto out;
 	}
@@ -94,7 +97,6 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	}
 
 	if (!qstr_case_eq(&dentry->d_name, &lower_dentry->d_name)) {
-		__d_drop(dentry);
 		err = 0;
 	}
 
@@ -113,7 +115,6 @@ static int sdcardfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
 	if (inode) {
 		data = top_data_get(SDCARDFS_I(inode));
 		if (!data || data->abandoned) {
-			d_drop(dentry);
 			err = 0;
 		}
 		if (data)
@@ -131,6 +132,8 @@ out:
 
 static void sdcardfs_d_release(struct dentry *dentry)
 {
+	if (!dentry || !dentry->d_fsdata)
+		return;
 	/* release and reset the lower paths */
 	if (has_graft_path(dentry))
 		sdcardfs_put_reset_orig_path(dentry);
@@ -185,7 +188,13 @@ static void sdcardfs_canonical_path(const struct path *path,
 	sdcardfs_get_real_lower(path->dentry, actual_path);
 }
 
+static int sdcardfs_d_delete(const struct dentry * dentry)
+{
+	return dentry->d_inode && !S_ISDIR(dentry->d_inode->i_mode);
+}
+
 const struct dentry_operations sdcardfs_ci_dops = {
+	.d_delete	= sdcardfs_d_delete,
 	.d_revalidate	= sdcardfs_d_revalidate,
 	.d_release	= sdcardfs_d_release,
 	.d_hash	= sdcardfs_hash_ci,

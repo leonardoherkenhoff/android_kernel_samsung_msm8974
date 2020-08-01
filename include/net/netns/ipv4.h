@@ -6,6 +6,7 @@
 #define __NETNS_IPV4_H__
 
 #include <net/inet_frag.h>
+#include <linux/siphash.h>
 
 struct ctl_table_header;
 struct ipv4_devconf;
@@ -41,8 +42,6 @@ struct netns_ipv4 {
 	struct xt_table		*iptable_security;
 #endif
 	struct xt_table		*nat_table;
-	struct hlist_head	*nat_bysource;
-	unsigned int		nat_htable_size;
 #endif
 
 	int sysctl_icmp_echo_ignore_all;
@@ -70,5 +69,6 @@ struct netns_ipv4 {
 	struct fib_rules_ops	*mr_rules_ops;
 #endif
 #endif
+	siphash_key_t	ip_id_key;
 };
 #endif
