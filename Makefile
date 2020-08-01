@@ -373,10 +373,7 @@ LINUXINCLUDE    := -I$(srctree)/arch/$(hdr-arch)/include \
 
 KBUILD_CPPFLAGS := -D__KERNEL__
 
-KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
-		   -fno-strict-aliasing -fno-common \
-		   -Werror-implicit-function-declaration \
-		   -Wno-format-security \
+KBUILD_CFLAGS   := -fno-strict-aliasing -fno-common \
 		   -fno-delete-null-pointer-checks \
 		   -mtune=cortex-a15 -mfpu=neon-vfpv4 \
 		   --param l1-cache-size=32 \
