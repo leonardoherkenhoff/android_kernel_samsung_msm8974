@@ -1111,10 +1111,6 @@ static int ath6kl_wmi_pstream_timeout_event_rx(struct wmi *wmi, u8 *datap,
 		return -EINVAL;
 
 	ev = (struct wmi_pstream_timeout_event *) datap;
-	if (ev->traffic_class >= WMM_NUM_AC) {
-		ath6kl_err("invalid traffic class: %d\n", ev->traffic_class);
-		return -EINVAL;
-	}
 
 	/*
 	 * When the pstream (fat pipe == AC) timesout, it means there were
@@ -1452,10 +1448,6 @@ static int ath6kl_wmi_cac_event_rx(struct wmi *wmi, u8 *datap, int len,
 		return -EINVAL;
 
 	reply = (struct wmi_cac_event *) datap;
-	if (reply->ac >= WMM_NUM_AC) {
-		ath6kl_err("invalid AC: %d\n", reply->ac);
-		return -EINVAL;
-	}
 
 	if ((reply->cac_indication == CAC_INDICATION_ADMISSION_RESP) &&
 	    (reply->status_code != IEEE80211_TSPEC_STATUS_ADMISS_ACCEPTED)) {
@@ -2467,7 +2459,7 @@ int ath6kl_wmi_delete_pstream_cmd(struct wmi *wmi, u8 if_idx, u8 traffic_class,
 	u16 active_tsids = 0;
 	int ret;
 
-	if (traffic_class >= WMM_NUM_AC) {
+	if (traffic_class > 3) {
 		ath6kl_err("invalid traffic class: %d\n", traffic_class);
 		return -EINVAL;
 	}

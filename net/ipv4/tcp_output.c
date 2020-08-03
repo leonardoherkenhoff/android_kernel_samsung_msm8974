@@ -56,7 +56,6 @@ int sysctl_tcp_tso_win_divisor __read_mostly = 3;
 
 int sysctl_tcp_mtu_probing __read_mostly = 0;
 int sysctl_tcp_base_mss __read_mostly = TCP_BASE_MSS;
-int sysctl_tcp_min_snd_mss __read_mostly = TCP_MIN_SND_MSS;
 
 /* By default, RFC2861 behavior.  */
 int sysctl_tcp_slow_start_after_idle __read_mostly = 1;
@@ -245,6 +244,9 @@ void tcp_select_initial_window(int __space, __u32 mss,
 		else
 			*rcv_wnd = min(*rcv_wnd, init_cwnd * mss);
 	}
+
+	/* Lock the initial TCP window size to 64K*/
+	*rcv_wnd = 64240;
 
 	/* Set the clamp no higher than max representable value */
 	(*window_clamp) = min(65535U << (*rcv_wscale), *window_clamp);
@@ -1017,11 +1019,6 @@ int tcp_fragment(struct sock *sk, struct sk_buff *skb, u32 len,
 	if (nsize < 0)
 		nsize = 0;
 
-	if (unlikely((sk->sk_wmem_queued >> 1) > sk->sk_sndbuf + 0x20000)) {
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPWQUEUETOOBIG);
-		return -ENOMEM;
-	}
-
 	if (skb_unclone(skb, GFP_ATOMIC))
 		return -ENOMEM;
 
@@ -1176,7 +1173,8 @@ int tcp_mtu_to_mss(const struct sock *sk, int pmtu)
 	mss_now -= icsk->icsk_ext_hdr_len;
 
 	/* Then reserve room for full set of TCP options and 8 bytes of data */
-	mss_now = max(mss_now, sysctl_tcp_min_snd_mss);
+	if (mss_now < 48)
+		mss_now = 48;
 
 	/* Now subtract TCP options size, not including SACKs */
 	mss_now -= tp->tcp_header_len - sizeof(struct tcphdr);
@@ -2107,10 +2105,8 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 		return -EAGAIN;
 
 	if (before(TCP_SKB_CB(skb)->seq, tp->snd_una)) {
-		if (unlikely(before(TCP_SKB_CB(skb)->end_seq, tp->snd_una))) {
-			WARN_ON_ONCE(1);
-			return -EINVAL;
-		}
+		if (before(TCP_SKB_CB(skb)->end_seq, tp->snd_una))
+			BUG();
 		if (tcp_trim_head(sk, skb, tp->snd_una - TCP_SKB_CB(skb)->seq))
 			return -ENOMEM;
 	}
@@ -2636,7 +2632,6 @@ static void tcp_connect_init(struct sock *sk)
 	sock_reset_flag(sk, SOCK_DONE);
 	tp->snd_wnd = 0;
 	tcp_init_wl(tp, 0);
-	tcp_write_queue_purge(sk);
 	tp->snd_una = tp->write_seq;
 	tp->snd_sml = tp->write_seq;
 	tp->snd_up = tp->write_seq;

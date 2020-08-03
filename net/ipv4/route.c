@@ -1398,19 +1398,21 @@ u32 ip_idents_reserve(u32 hash, int segs)
 }
 EXPORT_SYMBOL(ip_idents_reserve);
 
-void __ip_select_ident(struct net *net, struct iphdr *iph, int segs)
+void __ip_select_ident(struct iphdr *iph, int segs)
 {
+	static u32 ip_idents_hashrnd __read_mostly;
+	static bool hashrnd_initialized = false;
 	u32 hash, id;
 
-	/* Note the following code is not safe, but this is okay. */
-	if (unlikely(siphash_key_is_zero(&net->ipv4.ip_id_key)))
-		get_random_bytes(&net->ipv4.ip_id_key,
-				 sizeof(net->ipv4.ip_id_key));
+	if (unlikely(!hashrnd_initialized)) {
+		hashrnd_initialized = true;
+		get_random_bytes(&ip_idents_hashrnd, sizeof(ip_idents_hashrnd));
+	}
 
-	hash = siphash_3u32((__force u32)iph->daddr,
+	hash = jhash_3words((__force u32)iph->daddr,
 			    (__force u32)iph->saddr,
 			    iph->protocol,
-			    &net->ipv4.ip_id_key);
+			    ip_idents_hashrnd);
 	id = ip_idents_reserve(hash, segs);
 	iph->id = htons(id);
 }
@@ -2345,7 +2347,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 
 	if (res.type == RTN_LOCAL) {
 		err = fib_validate_source(skb, saddr, daddr, tos,
-					  LOOPBACK_IFINDEX,
+					  net->loopback_dev->ifindex,
 					  dev, &spec_dst, &itag);
 		if (err < 0)
 			goto martian_source_keep_err;
@@ -2672,7 +2674,7 @@ static struct rtable *ip_route_output_slow(struct net *net, struct flowi4 *fl4)
 	orig_saddr = fl4->saddr;
 	orig_oif = fl4->flowi4_oif;
 
-	fl4->flowi4_iif = LOOPBACK_IFINDEX;
+	fl4->flowi4_iif = net->loopback_dev->ifindex;
 	fl4->flowi4_tos = tos & IPTOS_RT_MASK;
 	fl4->flowi4_scope = ((tos & RTO_ONLINK) ?
 			 RT_SCOPE_LINK : RT_SCOPE_UNIVERSE);
@@ -2761,7 +2763,7 @@ static struct rtable *ip_route_output_slow(struct net *net, struct flowi4 *fl4)
 		if (!fl4->daddr)
 			fl4->daddr = fl4->saddr = htonl(INADDR_LOOPBACK);
 		dev_out = net->loopback_dev;
-		fl4->flowi4_oif = LOOPBACK_IFINDEX;
+		fl4->flowi4_oif = net->loopback_dev->ifindex;
 		res.type = RTN_LOCAL;
 		flags |= RTCF_LOCAL;
 		goto make_route;
@@ -2984,13 +2986,14 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 }
 EXPORT_SYMBOL_GPL(ip_route_output_flow);
 
-static int rt_fill_info(struct net *net, struct flowi4 *fl4,
+static int rt_fill_info(struct net *net,
 			struct sk_buff *skb, u32 pid, u32 seq, int event,
 			int nowait, unsigned int flags)
 {
 	struct rtable *rt = skb_rtable(skb);
 	struct rtmsg *r;
 	struct nlmsghdr *nlh;
+	struct flowi4 *fl4 = &(inet_sk(skb->sk))->cork.fl.u.ip4;
 	unsigned long expires = 0;
 	const struct inet_peer *peer = rt->peer;
 	u32 id = 0, ts = 0, tsage = 0, error;
@@ -3104,7 +3107,6 @@ static int inet_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr* nlh, void 
 	struct rtmsg *rtm;
 	struct nlattr *tb[RTA_MAX+1];
 	struct rtable *rt = NULL;
-	struct flowi4 fl4;
 	__be32 dst = 0;
 	__be32 src = 0;
 	u32 iif;
@@ -3144,14 +3146,6 @@ static int inet_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr* nlh, void 
 	else
 		uid = (iif ? INVALID_UID : current_uid());
 
-	memset(&fl4, 0, sizeof(fl4));
-	fl4.daddr = dst;
-	fl4.saddr = src;
-	fl4.flowi4_tos = rtm->rtm_tos;
-	fl4.flowi4_oif = tb[RTA_OIF] ? nla_get_u32(tb[RTA_OIF]) : 0;
-	fl4.flowi4_mark = mark;
-	fl4.flowi4_uid = uid;
-
 	if (iif) {
 		struct net_device *dev;
 
@@ -3172,6 +3166,14 @@ static int inet_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr* nlh, void 
 		if (err == 0 && rt->dst.error)
 			err = -rt->dst.error;
 	} else {
+		struct flowi4 fl4 = {
+			.daddr = dst,
+			.saddr = src,
+			.flowi4_tos = rtm->rtm_tos,
+			.flowi4_oif = tb[RTA_OIF] ? nla_get_u32(tb[RTA_OIF]) : 0,
+			.flowi4_mark = mark,
+			.flowi4_uid = uid,
+		};
 		rt = ip_route_output_key(net, &fl4);
 
 		err = 0;
@@ -3186,7 +3188,7 @@ static int inet_rtm_getroute(struct sk_buff *in_skb, struct nlmsghdr* nlh, void 
 	if (rtm->rtm_flags & RTM_F_NOTIFY)
 		rt->rt_flags |= RTCF_NOTIFY;
 
-	err = rt_fill_info(net, &fl4, skb, NETLINK_CB(in_skb).pid, nlh->nlmsg_seq,
+	err = rt_fill_info(net, skb, NETLINK_CB(in_skb).pid, nlh->nlmsg_seq,
 			   RTM_NEWROUTE, 0, 0);
 	if (err <= 0)
 		goto errout_free;
@@ -3224,8 +3226,8 @@ int ip_rt_dump(struct sk_buff *skb,  struct netlink_callback *cb)
 			if (rt_is_expired(rt))
 				continue;
 			skb_dst_set_noref(skb, &rt->dst);
-			if (rt_fill_info(net, &(inet_sk(skb->sk))->cork.fl.u.ip4, skb,
-					 NETLINK_CB(cb->skb).pid, cb->nlh->nlmsg_seq, RTM_NEWROUTE,
+			if (rt_fill_info(net, skb, NETLINK_CB(cb->skb).pid,
+					 cb->nlh->nlmsg_seq, RTM_NEWROUTE,
 					 1, NLM_F_MULTI) <= 0) {
 				skb_dst_drop(skb);
 				rcu_read_unlock_bh();

@@ -451,7 +451,7 @@ static void bmg160_work_func(struct work_struct *work)
 	int time_hi, time_lo;
 	u64 delay = ktime_to_ns(data->poll_delay);
 
-	get_monotonic_boottime(&ts);
+	ts = ktime_to_timespec(alarm_get_elapsed_realtime());
 	data->timestamp = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 
 	ret = bmg160_read_gyro_xyz(data, &gyro);
